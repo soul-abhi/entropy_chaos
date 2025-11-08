@@ -136,9 +136,6 @@ blind injection is inappropriate, adding a measurable safety gate and full expla
 | [doc/project_timeline.md](doc/project_timeline.md) | Status tracker, flagged bugs, 9/10 impact plan |
 | [doc/score.md](doc/score.md) | Idea/current score, research paper strategy, Chaos Monkey analysis |
 | [doc/PROJECT_DESCRIPTION.md](doc/PROJECT_DESCRIPTION.md) | Full concept and step-by-step flow |
-| [doc/report.md](doc/report.md) | Engineering report and scaling opinion |
-| [doc/START_FROM_MINIKUBE.md](doc/START_FROM_MINIKUBE.md) | Linux run guide |
-| [doc/chaos-module.md](doc/chaos-module.md) | Manual chaos helper notes |
 
 ---
 
