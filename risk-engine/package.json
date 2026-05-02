@@ -1,0 +1,13 @@
+{
+  "name": "risk-engine",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "express": "^4.19.2"
+  }
+}
