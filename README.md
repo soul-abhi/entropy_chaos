@@ -1,451 +1,162 @@
-# Adaptive Risk-Aware Chaos Engineering Framework
+<p align="center">
+  <img src="https://img.shields.io/badge/type-Chaos%20Engineering-blue?style=for-the-badge" alt="type"/>
+  <img src="https://img.shields.io/badge/status-Prototype%20%2F%20Demo-orange?style=for-the-badge" alt="status"/>
+  <img src="https://img.shields.io/badge/Idea-7.5%2F10-yellow?style=for-the-badge" alt="idea"/>
+  <img src="https://img.shields.io/badge/Current-5.5%2F10-red?style=for-the-badge" alt="current"/>
+  <img src="https://img.shields.io/badge/Target-9%2F10-brightgreen?style=for-the-badge" alt="target"/>
+</p>
 
-## 1. Project Summary
+<h1 align="center">Adaptive Risk-Aware Chaos Engineering Framework</h1>
 
-This project is a local, free, prototype implementation of an adaptive chaos engineering framework for microservices. The core idea is simple:
+<p align="center">
+  <b>Decide before you destroy.</b> A closed-loop controller that measures live risk, then injects
+  failure only when the system is healthy enough to tolerate it.
+</p>
 
-do not inject chaos blindly;
-first compute system risk in real time, then decide whether chaos is safe.
+<p align="center">
+  <img src="https://img.shields.io/badge/Node-20-brightgreen?style=flat-square" alt="node"/>
+  <img src="https://img.shields.io/badge/Kubernetes-Minikube-326ce5?style=flat-square" alt="k8s"/>
+  <img src="https://img.shields.io/badge/Prometheus-monitoring-e6522c?style=flat-square" alt="prom"/>
+  <img src="https://img.shields.io/badge/Grafana-dashboards-orange?style=flat-square" alt="grafana"/>
+  <img src="https://img.shields.io/badge/Docker-containers-2496ED?style=flat-square" alt="docker"/>
+  <img src="https://img.shields.io/badge/Express-API-000000?style=flat-square" alt="express"/>
+  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="license"/>
+</p>
 
-The prototype runs on local Kubernetes and demonstrates risk-aware, rule-based decision making before a pod-kill experiment is executed.
+---
 
-## 2. Why This Project Matters
+## What It Is
 
-Traditional chaos experiments often run on fixed schedules or manual triggers. That can create two problems:
+Most chaos tools inject failure on a schedule and hope the system survives. This framework asks a
+smarter question first:
 
-- injecting failure during already unstable conditions
-- missing chances to test resilience when the system is healthy
+> **"Is the system healthy enough right now to tolerate a fault injection?"**
 
-This framework introduces a risk gate. Chaos runs only when the system is in a safe window according to live metrics.
+It watches live metrics, computes a **Resilience Risk Score (RRS)**, classifies the system as
+**SAFE / MODERATE / CRITICAL**, and deletes a service pod **only inside a safe window**. Kubernetes
+then self-heals. The real contribution is the **explainable decision layer** in front of chaos, not
+chaos itself.
 
-## 3. What Is New Compared to Typical Chaos Demos
+---
 
-- Decision-first chaos: experimentation is controlled by a risk score, not by a timer alone.
-- Adaptive behavior: same chaos action can be allowed, softened, or blocked based on current state.
-- Monitoring + control loop: Prometheus metrics directly feed the chaos decision engine.
-- Clear explainability: every cycle prints metrics, score, state, and final action in logs.
+## Feature Board
 
-## 4. Prototype Scope (Current Version)
+| Capability | State | Detail |
+|------------|-------|--------|
+| Live metrics collection (Prometheus) | SHIPPED | Scrapes both services every 5s |
+| RRS scoring (latency, error, CPU, memory) | SHIPPED | Weighted, configurable |
+| Three-state decision (SAFE / MODERATE / CRITICAL) | SHIPPED | ALLOW / REDUCE / BLOCK |
+| Controlled pod-delete chaos | SHIPPED | Gated by SAFE + cooldown |
+| Kubernetes self-healing | SHIPPED | Native Deployment controller |
+| Grafana dashboards | SHIPPED | Provisioned datasource |
+| Adaptive thresholds | PLANNED | Rolling-baseline anomaly gating |
+| Second fault primitive | PLANNED | Network latency / CPU stress |
+| Decision persistence | PLANNED | Replay & analysis |
+| Automated tests + CI | PLANNED | Unit + integration + audit |
 
-Included in this prototype:
+---
 
-- two microservices
-- Prometheus metrics collection
-- rule-based resilience risk score calculation
-- three-state decision logic (SAFE, MODERATE, CRITICAL)
-- chaos action: Kubernetes pod deletion
-- automatic rollback via Kubernetes self-healing
+## Architecture
 
-Not included in this prototype:
-
-- machine learning
-- managed cloud services
-- complex multi-fault orchestration
-- production hardening (auth, multi-tenant security, persistent data layer)
-
-## 5. Architecture Followed
-
-### 5.1 High-Level Flow
-
-1. Service A and Service B expose metrics.
-2. Prometheus scrapes and stores live metrics.
-3. Risk Engine queries Prometheus every 30 seconds.
-4. Risk Engine computes RRS and classifies system state.
-5. Risk Engine decides whether to run chaos.
-6. If allowed, a Service A pod is deleted.
-7. Kubernetes recreates the pod automatically.
-
-### 5.2 Component Diagram
-
-```text
-                    +-----------------------------+
-                    |       Prometheus UI         |
-                    |       localhost:9090        |
-                    +-------------+---------------+
-                                  ^
-                                  |
-                      scrape /metrics endpoints
-                                  |
-+------------------+       +------+-------+
-|   Service A      |       |   Service B  |
-| /api /health     |       | worker sim   |
-| /metrics         |       | /metrics     |
-+--------+---------+       +------+-------+
-         ^                        ^
-         |                        |
-         +-----------+------------+
-                     |
-                     v
-            +--------+---------+
-            |   Risk Engine    |
-            | query + scoring  |
-            | decision every   |
-            | 30 seconds       |
-            +--------+---------+
-                     |
-                     | ALLOW_CHAOS only
-                     v
-            kubectl delete pod <service-a-pod>
-                     |
-                     v
-               Kubernetes self-healing
+```mermaid
+flowchart LR
+    subgraph Apps
+        A[Service A :3000<br/>API + metrics]
+        B[Service B :3001<br/>worker sim]
+    end
+    A -->|/metrics| P[(Prometheus :9090)]
+    B -->|/metrics| P
+    P -->|query every 30s| R[Risk Engine :3002]
+    R -->|RRS + state| R
+    R -->|ALLOW_CHAOS only| K[kubectl delete pod]
+    K -->|self-heal| A
+    G[(Grafana :3000)] -->|datasource| P
 ```
 
-### 5.3 Risk Formula Used
+## Decision Loop
 
-RRS = (W1 × Latency) + (W2 × ErrorRate) + (W3 × CPU) + (W4 × Memory)
-
-Current default weights:
-
-- W1 latency = 0.35
-- W2 error rate = 0.35
-- W3 CPU = 0.20
-- W4 memory = 0.10
-
-Thresholds:
-
-- RRS < 40 -> SAFE -> ALLOW_CHAOS
-- 40 <= RRS < 70 -> MODERATE -> REDUCE_INTENSITY
-- RRS >= 70 -> CRITICAL -> BLOCK_CHAOS
-
-## 6. Tech Stack Used
-
-- Node.js (Express)
-- prom-client
-- Docker
-- Kubernetes (Minikube or Docker Desktop K8s)
-- Prometheus
-- kubectl
-
-All tools are free and run locally.
-
-## 7. Folder Structure
-
-```text
-adaptive-chaos/
-├── service-a/
-│   ├── index.js
-│   ├── package.json
-│   └── Dockerfile
-├── service-b/
-│   ├── index.js
-│   ├── package.json
-│   └── Dockerfile
-├── risk-engine/
-│   ├── index.js
-│   ├── package.json
-│   └── Dockerfile
-├── chaos-module/
-│   ├── chaos-injector.js
-│   └── README.md
-├── k8s/
-│   ├── prometheus.yaml
-│   ├── services.yaml
-│   └── deployments.yaml
-└── README.md
+```mermaid
+stateDiagram-v2
+    [*] --> Collect: query Prometheus
+    Collect --> Score: normalize + RRS
+    Score --> SAFE: RRS < 40
+    Score --> MODERATE: 40 <= RRS < 70
+    Score --> CRITICAL: RRS >= 70
+    SAFE --> ALLOW: delete 1 pod
+    MODERATE --> REDUCE: lower intensity
+    CRITICAL --> BLOCK: no chaos
+    ALLOW --> Collect
+    REDUCE --> Collect
+    BLOCK --> Collect
 ```
 
-## 8. Setup Guide (Windows, Step by Step)
+**Risk formula:** `RRS = 0.35·latency + 0.35·errorRate + 0.20·CPU + 0.10·memory`
 
-## 8.1 Install Prerequisites
+---
 
-Install these first:
+## Quick Start
 
-- Docker Desktop
-- Node.js LTS (20+)
-- kubectl
-- Minikube
+Full instructions for Windows and Linux are in **[doc/setup.md](doc/setup.md)**.
 
-Optional one-line installs using winget:
-
-```powershell
-winget install -e --id Docker.DockerDesktop
-winget install -e --id OpenJS.NodeJS.LTS
-winget install -e --id Kubernetes.kubectl
-winget install -e --id Kubernetes.minikube
-```
-
-## 8.2 Open the Project
-
-```powershell
-cd E:\major-project\adaptive-chaos
-```
-
-## 8.3 Start Local Kubernetes
-
-```powershell
+```bash
+# Linux (summary)
 minikube start --driver=docker
-minikube -p minikube docker-env --shell powershell | Invoke-Expression
-kubectl get nodes
+eval "$(minikube -p minikube docker-env --shell bash)"
+docker build -t adaptive-chaos-service-a:local ./service-a
+docker build -t adaptive-chaos-service-b:local ./service-b
+docker build -t adaptive-chaos-risk-engine:local ./risk-engine
+kubectl apply -f ./k8s/prometheus.yaml ./k8s/grafana.yaml ./k8s/services.yaml ./k8s/deployments.yaml
+kubectl port-forward svc/risk-engine 3002:3002 &
+curl -sS http://localhost:3002/decision
 ```
 
-## 8.4 Build Project Images
+---
 
-```powershell
-docker build -t adaptive-chaos-service-a:local .\service-a
-docker build -t adaptive-chaos-service-b:local .\service-b
-docker build -t adaptive-chaos-risk-engine:local .\risk-engine
-```
+## How It Compares to Netflix Chaos Monkey
 
-## 8.5 Deploy the System
+| Dimension | Netflix Chaos Monkey | This Framework |
+|-----------|---------------------|----------------|
+| Trigger | Random + schedule | Metric-driven risk gate |
+| Risk assessment | None (assumes always-safe) | Yes (RRS + state) |
+| Environment | Production | Local prototype |
+| Explainability | Low | High (every cycle logged) |
+| Goal | Prove constant resilience | Avoid injecting during instability |
 
-```powershell
-kubectl apply -f .\k8s\prometheus.yaml
-kubectl apply -f .\k8s\services.yaml
-kubectl apply -f .\k8s\deployments.yaml
-kubectl get pods -w
-```
+We are **not** a replacement for Chaos Monkey. We target the pre-production and educational gap where
+blind injection is inappropriate, adding a measurable safety gate and full explainability. See
+**[doc/score.md](doc/score.md)** for the full comparison and research framing.
 
-## 8.6 Emergency One-Click Run (Fast Demo)
+---
 
-If you need to start everything quickly during a panel/demo:
+## Documentation
 
-1. Double-click `RUN-EMERGENCY.cmd`
-2. It will automatically:
-   - ensure Minikube and Docker session setup
-   - build images
-   - apply Kubernetes manifests
-   - wait for rollouts
-   - open separate terminals for: - Prometheus port-forward (`9090`) - Service A port-forward (`3000`) - Risk Engine port-forward (`3002`) - Risk Engine live logs - Minikube dashboard
+| Document | Purpose |
+|----------|---------|
+| [doc/setup.md](doc/setup.md) | Windows + Linux setup, teardown, troubleshooting |
+| [doc/project_timeline.md](doc/project_timeline.md) | Status tracker, flagged bugs, 9/10 impact plan |
+| [doc/score.md](doc/score.md) | Idea/current score, research paper strategy, Chaos Monkey analysis |
+| [doc/PROJECT_DESCRIPTION.md](doc/PROJECT_DESCRIPTION.md) | Full concept and step-by-step flow |
+| [doc/report.md](doc/report.md) | Engineering report and scaling opinion |
+| [doc/START_FROM_MINIKUBE.md](doc/START_FROM_MINIKUBE.md) | Linux run guide |
+| [doc/chaos-module.md](doc/chaos-module.md) | Manual chaos helper notes |
 
-Manual equivalent:
+---
 
-```powershell
-cd E:\major-project\adaptive-chaos
-powershell -ExecutionPolicy Bypass -File .\scripts\run-all.ps1
-```
+## Project Health
 
-Optional flags:
+<p align="center">
+  <img src="https://img.shields.io/badge/Idea-7.5%2F10-yellow" alt="idea"/>
+  <img src="https://img.shields.io/badge/Current-5.5%2F10-red" alt="current"/>
+  <img src="https://img.shields.io/badge/Target-9%2F10-brightgreen" alt="target"/>
+</p>
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run-all.ps1 -SkipBuild
-powershell -ExecutionPolicy Bypass -File .\scripts\run-all.ps1 -NoDashboard
-```
+The roadmap to 9/10 (fixing the safe-window defect, adding tests, making Service B a real dependency,
+and adding a second fault type + persistence) is tracked in
+**[doc/project_timeline.md](doc/project_timeline.md)** Section 8.
 
-## 9. Demo Execution Flow (Panel-Ready)
+---
 
-Use these exact steps during presentation.
+## Security Note
 
-## 9.1 Show Running Pods
-
-```powershell
-kubectl get pods
-```
-
-## 9.2 Open Prometheus (GUI)
-
-```powershell
-kubectl port-forward svc/prometheus 9090:9090
-```
-
-Open browser at:
-
-- http://localhost:9090
-
-## 9.3 Generate API Traffic
-
-Terminal A:
-
-```powershell
-kubectl port-forward svc/service-a 3000:3000
-```
-
-Terminal B:
-
-```powershell
-for ($i=0; $i -lt 100; $i++) { try { Invoke-WebRequest http://localhost:3000/api -UseBasicParsing | Out-Null } catch {}; Start-Sleep -Milliseconds 200 }
-```
-
-## 9.4 Observe Adaptive Decisions
-
-```powershell
-kubectl logs deployment/risk-engine -f
-```
-
-You should see:
-
-- Current Metrics
-- Current RRS
-- Current System State
-- Chaos Decision
-- Chaos Action
-
-## 9.5 Optional JSON Decision View
-
-```powershell
-kubectl port-forward svc/risk-engine 3002:3002
-```
-
-Open:
-
-- http://localhost:3002/decision
-
-## 10. What We Built Internally (Engineering View)
-
-Service A:
-
-- API endpoint with simulated latency and random failure rate
-- health endpoint
-- Prometheus metrics endpoint
-- custom counters, latency histogram, CPU and memory gauges
-
-Service B:
-
-- background worker simulation with synthetic load
-- Prometheus metrics endpoint
-- CPU and memory reporting
-
-Risk Engine:
-
-- queries Prometheus API every 30 seconds
-- normalizes live metric values
-- computes RRS
-- maps score to state and decision
-- conditionally executes chaos via kubectl delete pod
-- applies cooldown to avoid excessive pod kills
-
-Kubernetes + RBAC:
-
-- deployments and services for all components
-- Prometheus deployment + scrape config
-- role-based access for risk engine pod operations
-
-## 11. Use Cases
-
-This framework is useful for:
-
-- academic projects and research demonstrations in resilience engineering
-- pre-production testing of microservice stability under controlled faults
-- DevOps teams introducing safer chaos practices with guardrails
-- teaching risk-aware automation in distributed systems
-
-## 12. Security and Dependency Status
-
-Current state of the prototype dependencies:
-
-- npm install completed for all Node services
-- npm audit completed
-- no high or critical vulnerabilities currently reported
-
-Recommended recurring check:
-
-```powershell
-cd E:\major-project\adaptive-chaos\service-a; npm audit --audit-level=high
-cd E:\major-project\adaptive-chaos\service-b; npm audit --audit-level=high
-cd E:\major-project\adaptive-chaos\risk-engine; npm audit --audit-level=high
-```
-
-## 13. Troubleshooting
-
-### 13.1 minikube command not recognized
-
-- reopen PowerShell after installation
-- verify PATH contains Minikube install directory
-- run: minikube version
-
-### 13.2 docker command not recognized
-
-- ensure Docker Desktop is installed and running
-- verify Docker CLI path exists in PATH
-- run: docker --version
-
-### 13.3 pods not starting
-
-- check events: kubectl describe pod <pod-name>
-- check logs: kubectl logs deployment/<deployment-name>
-
-### 13.4 Prometheus has no data
-
-- verify port-forward is active
-- verify service pods are running
-- check scrape targets in Prometheus UI
-
-### 13.5 risk-engine cannot delete pod
-
-- verify RBAC objects are applied from deployments.yaml
-- verify risk-engine service account is attached in deployment
-
-## 14. Frequently Asked Questions (Faculty + Technical)
-
-Q1. Is this project only chaos testing?
-
-No. The main contribution is adaptive risk-based decision control before chaos execution.
-
-Q2. Why not inject chaos continuously?
-
-Continuous blind chaos can destabilize systems unnecessarily. This framework adds safety-aware gating.
-
-Q3. Why rule-based first instead of ML?
-
-For prototype reliability, transparency, and local reproducibility. Rule logic is easy to explain and validate.
-
-Q4. How is rollback handled?
-
-Rollback is native Kubernetes self-healing. Deleted pods are recreated by deployment controllers.
-
-Q5. Can this run without cloud services?
-
-Yes. Entire stack runs locally on Minikube and Docker Desktop.
-
-Q6. What metric is most important in scoring?
-
-In this prototype, latency and error rate have highest weight. Weights are configurable.
-
-Q7. Does this support real production clusters now?
-
-Not yet. This version is intentionally scoped for local prototype demonstration.
-
-Q8. What is the novelty from a research point of view?
-
-The closed-loop architecture linking observability metrics to adaptive fault-injection authorization is the primary novelty.
-
-Q9. How often is risk evaluated?
-
-Every 30 seconds by default.
-
-Q10. Can decisions be audited later?
-
-Yes. Decision logs provide a complete step-by-step record of metric values and actions.
-
-## 15. Future Scope and Long-Term Vision
-
-The current prototype proves that risk-aware chaos control is feasible. The long-term direction is to evolve this into an intelligent resilience validation platform.
-
-Planned evolution themes:
-
-- move from static scoring toward predictive risk modeling using historical observations
-- tune metric influence dynamically instead of fixed weighting
-- expand beyond pod kill into broader failure domains such as network and resource faults
-- scale from two services to larger, multi-service and potentially multi-cluster environments
-- integrate with CI/CD for resilience gates, automated quality checks, and controlled release confidence
-- add richer dashboards and reporting for resilience scoring, trend analysis, and governance visibility
-- develop stronger experimental methodology for benchmarking recovery behavior and comparative resilience performance
-
-In short: prototype validates feasibility; next phases target intelligence, scale, automation, and research depth.
-
-## 16. Upcoming Phase Plan (Practical Roadmap)
-
-Phase 1 complete:
-
-- local adaptive prototype with rule-based decisions
-
-Phase 2 next:
-
-- richer chaos experiments and stronger observability dashboards
-
-Phase 3 after that:
-
-- CI/CD integration, automated validation gates, and reporting workflow
-
-Phase 4 long term:
-
-- predictive risk intelligence and large-scale resilience benchmarking
-
-## 17. Two-Minute Panel Pitch (Suggested)
-
-This system is an Adaptive Risk-Aware Chaos Engineering Framework.
-Instead of injecting failures blindly, we first calculate live risk from latency, errors, CPU, and memory.
-Every 30 seconds, our engine classifies system state as SAFE, MODERATE, or CRITICAL.
-Only if the system is SAFE do we allow chaos and delete a service pod.
-Kubernetes then self-heals automatically.
-So the innovation is not chaos itself, but intelligent, explainable decision control before chaos.
+Grafana ships with hardcoded `admin/admin` in `k8s/grafana.yaml`. This is **demo-only**. Never deploy
+to a shared or production cluster without replacing credentials and adding auth on the Risk Engine API.
