@@ -41,7 +41,7 @@ async function queryPrometheus(query) {
             return 0;
         }
 
-        const value = Number(result[0].value?.[1]);
+        const value = (result[0].value?.[1]);
         return Number.isFinite(value) ? value : 0;
     } catch (error) {
         console.error(`[risk-engine] Prometheus query failed: ${query}`);
@@ -123,8 +123,8 @@ async function evaluateRiskAndAct() {
         errorRatePercent: await queryPrometheus(
             '(sum(rate(service_a_request_errors_total[1m])) / clamp_min(sum(rate(service_a_requests_total[1m])), 0.0001)) * 100'
         ),
-        cpuPercent: await queryPrometheus('avg(app_cpu_usage_percent)'),
-        memoryPercent: await queryPrometheus('avg(app_memory_usage_percent)'),
+        cpuPercent: await queryPrometheus('avg(app_cpu_usage_percent{service="service-a"})'),
+        memoryPercent: await queryPrometheus('avg(app_memory_usage_percent{service="service-a"})'),
     };
 
     const normalizedMetrics = normalizeMetrics(rawMetrics);
