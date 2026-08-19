@@ -1,9 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/type-Chaos%20Engineering-blue?style=for-the-badge" alt="type"/>
   <img src="https://img.shields.io/badge/status-Prototype%20%2F%20Demo-orange?style=for-the-badge" alt="status"/>
-  <img src="https://img.shields.io/badge/Idea-7.5%2F10-yellow?style=for-the-badge" alt="idea"/>
-  <img src="https://img.shields.io/badge/Current-5.5%2F10-red?style=for-the-badge" alt="current"/>
-  <img src="https://img.shields.io/badge/Target-9%2F10-brightgreen?style=for-the-badge" alt="target"/>
 </p>
 
 <h1 align="center">Adaptive Risk-Aware Chaos Engineering Framework</h1>
@@ -133,23 +130,9 @@ blind injection is inappropriate, adding a measurable safety gate and full expla
 | Document | Purpose |
 |----------|---------|
 | [doc/setup.md](doc/setup.md) | Windows + Linux setup, teardown, troubleshooting |
-| [doc/project_timeline.md](doc/project_timeline.md) | Status tracker, flagged bugs, 9/10 impact plan |
-| [doc/score.md](doc/score.md) | Idea/current score, research paper strategy, Chaos Monkey analysis |
+| [doc/project_timeline.md](doc/project_timeline.md) | Status tracker and flagged bugs |
+| [doc/score.md](doc/score.md) | Research paper strategy and Chaos Monkey analysis |
 | [doc/PROJECT_DESCRIPTION.md](doc/PROJECT_DESCRIPTION.md) | Full concept and step-by-step flow |
-
----
-
-## Project Health
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Idea-7.5%2F10-yellow" alt="idea"/>
-  <img src="https://img.shields.io/badge/Current-5.5%2F10-red" alt="current"/>
-  <img src="https://img.shields.io/badge/Target-9%2F10-brightgreen" alt="target"/>
-</p>
-
-The roadmap to 9/10 (fixing the safe-window defect, adding tests, making Service B a real dependency,
-and adding a second fault type + persistence) is tracked in
-**[doc/project_timeline.md](doc/project_timeline.md)** Section 8.
 
 ---
 
