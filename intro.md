@@ -194,5 +194,3 @@ Interviewers value you finding and understanding your own bug, explaining the ro
 - **Timing:** scrape 5s, decision loop 30s, chaos cooldown 90s
 - **Chaos action:** delete one pod labeled `app=service-a` via kubectl, `--wait=false`
 
-
-## THE END
