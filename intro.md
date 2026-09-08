@@ -14,7 +14,7 @@
 
 The whole system is one closed control loop running every 30 seconds:
 
-1. **Services expose metrics.** Service A (`/api` with simulated 50–750ms latency, 20% random failures) and Service B (background worker sim) export Prometheus metrics on `/metrics` via `prom-client`.
+1. **Services expose metrics.** Service A (`/api` with simulated 50–750ms latency and a configurable failure rate — `FAILURE_RATE`, default 5%) and Service B (background worker sim) export Prometheus metrics on `/metrics` via `prom-client`.
 2. **Prometheus scrapes** both services every 5 seconds (`k8s/prometheus.yaml`, scrape interval 5s).
 3. **Risk Engine queries Prometheus** every 30 seconds via PromQL (`risk-engine/index.js`):
    - latency: `avg_over_time(service_a_last_request_latency_ms[1m])`
@@ -24,7 +24,7 @@ The whole system is one closed control loop running every 30 seconds:
 4. **Normalize** each raw value to a 0–100 scale (so mixed units become comparable).
 5. **Compute RRS** = `0.35·latency + 0.35·errorRate + 0.20·CPU + 0.10·memory` (weights configurable via env `W1`–`W4`).
 6. **Classify:** SAFE (< 40), MODERATE (40–70), CRITICAL (≥ 70).
-7. **Decide:** SAFE → ALLOW_CHAOS, MODERATE → REDUCE_INTENSITY, CRITICAL → BLOCK_CHAOS.
+7. **Decide:** SAFE → ALLOW_CHAOS (start a pod-delete experiment). MODERATE and CRITICAL → BLOCK_CHAOS (do **not** start new chaos); MODERATE is still surfaced as a distinct system state. Genuine REDUCE/ABORT — lowering or killing a *running* fault mid-flight — is reserved for the trajectory-control phase.
 8. **Act:** only on ALLOW_CHAOS **and** past the cooldown (90s) does it run `kubectl delete pod` on a pod labeled `app=service-a`.
 9. **Self-heal:** the Deployment controller sees a replica dropped below desired count and recreates the pod.
 
@@ -108,7 +108,7 @@ These functions are the heart. Be ready to walk through each one.
 function normalizeMetrics(raw) {
     return {
         latency: Math.min(raw.latencyMs / 10, 100),        // 0-1000ms -> 0-100
-        errorRate: Math.min(raw.errorRatePercent * 5, 100), // % scaled up
+        errorRate: Math.min(raw.errorRatePercent * 2, 100), // 50% error saturates at 100; 5% baseline = 10
         cpu: Math.min(raw.cpuPercent, 100),
         memory: Math.min(raw.memoryPercent, 100),
     };
@@ -127,17 +127,17 @@ function calculateRRS(normalized) {
 }
 ```
 
-**3. `classifySystem` + `decisionFromState`** — `risk-engine/index.js`
+**3. `classifySystem` + `decisionFromState`** — `risk-engine/risk-core.js`
 ```js
 function classifySystem(rrs) {
-    if (rrs < 40) return 'SAFE';
-    if (rrs < 70) return 'MODERATE';
+    if (rrs < SAFE_THRESHOLD) return 'SAFE';        // 40
+    if (rrs < CRITICAL_THRESHOLD) return 'MODERATE'; // 70
     return 'CRITICAL';
 }
 function decisionFromState(state) {
-    if (state === 'SAFE') return 'ALLOW_CHAOS';
-    if (state === 'MODERATE') return 'REDUCE_INTENSITY';
-    return 'BLOCK_CHAOS';
+    // Only SAFE starts a new experiment; MODERATE/CRITICAL both block. There is
+    // no running fault to "reduce" yet — REDUCE/ABORT arrive with trajectory control.
+    return state === 'SAFE' ? 'ALLOW_CHAOS' : 'BLOCK_CHAOS';
 }
 ```
 
@@ -155,10 +155,12 @@ function tryInjectChaos(decision) {
 ```js
 const currentCpuUsage = process.cpuUsage(lastCpuUsage);          // delta since last call
 const usedMicros = currentCpuUsage.user + currentCpuUsage.system;
-const cpuPercent = (usedMicros / (elapsedMs * 1000 * os.cpus().length)) * 100;
+const cpuPercent = Math.min(100, (usedMicros / (elapsedMs * 1000)) * 100);
 ```
 
-That computes CPU as a percentage of wall-clock time × cores — a real systems concept.
+That computes CPU as a percentage of one core used on average over the wall-clock window — a real
+systems concept. (An earlier version multiplied by the core count in the numerator and divided by it
+in the denominator; the factor cancels out, so it was removed.)
 
 **6. Error-rate PromQL** — the clamp-min detail
 ```promql
@@ -168,20 +170,37 @@ That computes CPU as a percentage of wall-clock time × cores — a real systems
 
 ---
 
-## 7. The Known Tuning Bug (turn it into a strength)
+## 7. The Tuning Bug We Found — and How We Fixed It (turn it into a strength)
 
-At default settings, **the SAFE state is mathematically unreachable, so auto-chaos never fires.** The math:
+During review I found a real calibration bug: **at the original defaults the SAFE state was
+mathematically unreachable, so auto-chaos never fired.** The math behind the finding:
 
-- Error normalization is `errorRatePercent * 5`. Service A fails 20% of requests by design, so `20 * 5 = 100` (saturated).
-- So error rate alone contributes `0.35 × 100 = 35` points to RRS.
-- Latency averages ~400ms → normalized ~40 → contributes `0.35 × 40 = 14`.
+- Error normalization was `errorRatePercent * 5`. Service A failed 20% of requests by design, so `20 * 5 = 100` (saturated).
+- Error rate alone contributed `0.35 × 100 = 35` points to RRS.
+- Latency averaged ~400ms → normalized ~40 → contributed `0.35 × 40 = 14`.
 - RRS ≈ 49.8 → classified **MODERATE**, forever. SAFE needs `< 40`.
 
-If the interviewer asks "so does it actually delete pods?" — turn it into a strength:
+The fix, landed as Phase 0 of the roadmap:
 
-> "Great question. I actually found a calibration bug during review: the error-rate normalization saturated at the default 20% failure rate, which pinned RRS around 50 — permanently in MODERATE — so the safe window was unreachable and auto-chaos rarely fired. The fix is straightforward: make the failure rate configurable (lower default), rescale error normalization, or make the SAFE threshold configurable — and add a deterministic demo-safe mode. This is exactly why I'm adding unit tests for the scoring functions."
+- Make Service A's failure rate **configurable** via `FAILURE_RATE` (default lowered to 5%).
+- Rescale error normalization to `errorRatePercent * 2` — the 5% baseline now reads as 10 (low risk).
+- Add `DEMO_SAFE_MODE`: skip Prometheus and feed deterministic low-risk metrics so the whole
+  SAFE → ALLOW_CHAOS → DELETED_POD → self-heal loop is reproducible for a demo.
+- Add fail-closed observability: if any metric is missing or unqueryable, chaos is **BLOCKED**
+  instead of guessing — an unobservable system is not provably safe.
+- Guard it all with unit tests (`node --test`, zero new dependencies), including a regression test
+  asserting the default healthy baseline scores SAFE.
 
-Interviewers value you finding and understanding your own bug, explaining the root cause with numbers, and knowing the fix.
+After the fix: latency ~400ms → 40, error 5% → 10, low CPU/memory → **RRS ≈ 20 → SAFE → ALLOW_CHAOS**
+actually fires. If the interviewer asks "so does it actually delete pods?":
+
+> "Yes — but only when the system is provably healthy enough. I actually caught a calibration bug
+> during review where the safe window was mathematically unreachable at the old defaults. That is
+> exactly why the scoring now ships with unit tests and a deterministic demo-safe mode, so the loop
+> is provable and reproducible rather than a hand-wave."
+
+Interviewers value you finding and understanding your own bug, explaining the root cause with
+numbers, and knowing — and demonstrating — the fix.
 
 ---
 
@@ -191,6 +210,8 @@ Interviewers value you finding and understanding your own bug, explaining the ro
 - **Replicas:** service-a = 2, service-b = 1, risk-engine = 1
 - **Weights:** W1=0.35 latency, W2=0.35 error, W3=0.20 CPU, W4=0.10 memory
 - **Thresholds:** SAFE < 40, MODERATE < 70, else CRITICAL
+- **Decision:** SAFE → ALLOW_CHAOS; MODERATE & CRITICAL → BLOCK_CHAOS
+- **Failure config:** `FAILURE_RATE` default 0.05; error normalization `*2`; `DEMO_SAFE_MODE=true` feeds fixed safe metrics
 - **Timing:** scrape 5s, decision loop 30s, chaos cooldown 90s
 - **Chaos action:** delete one pod labeled `app=service-a` via kubectl, `--wait=false`
 

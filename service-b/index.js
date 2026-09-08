@@ -43,9 +43,12 @@ function updateResourceMetrics() {
     const elapsedMs = Math.max(now - lastCpuTime, 1);
     const currentCpuUsage = process.cpuUsage(lastCpuUsage);
     const usedMicros = currentCpuUsage.user + currentCpuUsage.system;
+    // Percent of one CPU core used on average over the window. (The old formula
+    // multiplied by os.cpus().length in both numerator and denominator, which
+    // cancelled out — removed as dead math.)
     const cpuPercent = Math.min(
         100,
-        (usedMicros / (elapsedMs * 1000 * os.cpus().length)) * 100 * os.cpus().length
+        (usedMicros / (elapsedMs * 1000)) * 100
     );
 
     const memoryPercent = Math.min(

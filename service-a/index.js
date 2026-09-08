@@ -4,6 +4,7 @@ const os = require('os');
 
 const app = express();
 const port = process.env.PORT || 3000;
+const FAILURE_RATE = Math.min(Math.max(Number(process.env.FAILURE_RATE || 0.05), 0), 1);
 
 const register = new client.Registry();
 client.collectDefaultMetrics({ register, prefix: 'service_a_' });
@@ -56,9 +57,12 @@ function updateResourceMetrics() {
     const elapsedMs = Math.max(now - lastCpuTime, 1);
     const currentCpuUsage = process.cpuUsage(lastCpuUsage);
     const usedMicros = currentCpuUsage.user + currentCpuUsage.system;
+    // Percent of one CPU core used on average over the window. (The old formula
+    // multiplied by os.cpus().length in both numerator and denominator, which
+    // cancelled out — removed as dead math.)
     const cpuPercent = Math.min(
         100,
-        (usedMicros / (elapsedMs * 1000 * os.cpus().length)) * 100 * os.cpus().length
+        (usedMicros / (elapsedMs * 1000)) * 100
     );
 
     const memoryPercent = Math.min(
@@ -85,7 +89,7 @@ app.get('/api', async (_req, res) => {
     latencyHistogram.observe(latencyMs);
     latencyGauge.set(latencyMs);
 
-    const isError = Math.random() < 0.2;
+    const isError = Math.random() < FAILURE_RATE;
     if (isError) {
         errorCounter.inc();
         return res.status(500).json({

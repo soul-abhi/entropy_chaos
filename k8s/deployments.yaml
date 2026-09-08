@@ -42,6 +42,9 @@ spec:
         - name: service-a
           image: adaptive-chaos-service-a:local
           imagePullPolicy: Never
+          env:
+            - name: FAILURE_RATE
+              value: "0.05"
           ports:
             - containerPort: 3000
 ---
@@ -102,5 +105,7 @@ spec:
               value: "0.20"
             - name: W4
               value: "0.10"
+            - name: DEMO_SAFE_MODE
+              value: "false"
           ports:
             - containerPort: 3002

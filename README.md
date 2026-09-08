@@ -42,8 +42,12 @@ chaos itself.
 |------------|-------|--------|
 | Live metrics collection (Prometheus) | SHIPPED | Scrapes both services every 5s |
 | RRS scoring (latency, error, CPU, memory) | SHIPPED | Weighted, configurable |
-| Three-state decision (SAFE / MODERATE / CRITICAL) | SHIPPED | ALLOW / REDUCE / BLOCK |
+| Three-state decision (SAFE / MODERATE / CRITICAL) | SHIPPED | ALLOW / BLOCK (REDUCE & ABORT planned for running-fault control) |
 | Controlled pod-delete chaos | SHIPPED | Gated by SAFE + cooldown |
+| Configurable failure rate (`FAILURE_RATE`) | SHIPPED | Default 5%, clamped to 0-1 |
+| Deterministic demo-safe mode | SHIPPED | `DEMO_SAFE_MODE` feeds fixed safe metrics |
+| Fail-closed observability | SHIPPED | Blocks chaos when any metric is missing |
+| Scoring unit tests (`node --test`) | SHIPPED | Zero-dependency regression guard |
 | Kubernetes self-healing | SHIPPED | Native Deployment controller |
 | Grafana dashboards | SHIPPED | Provisioned datasource |
 | Adaptive thresholds | PLANNED | Rolling-baseline anomaly gating |
@@ -80,10 +84,9 @@ stateDiagram-v2
     Score --> MODERATE: 40 <= RRS < 70
     Score --> CRITICAL: RRS >= 70
     SAFE --> ALLOW: delete 1 pod
-    MODERATE --> REDUCE: lower intensity
+    MODERATE --> BLOCK: no new chaos
     CRITICAL --> BLOCK: no chaos
     ALLOW --> Collect
-    REDUCE --> Collect
     BLOCK --> Collect
 ```
 
